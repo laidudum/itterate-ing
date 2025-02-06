@@ -3,7 +3,7 @@ name: Subdomain Scanner and HTTP Checker
 on:
   push:
     branches:
-      - main
+      - main # Ganti dengan branch yang Anda gunakan
   workflow_dispatch:
 
 jobs:
@@ -42,6 +42,7 @@ jobs:
       # Check HTTP status for each subdomain
       - name: Check HTTP status
         run: |
+          mkdir -p results
           for file in results/*_subdomains.txt; do
             httpx -l "$file" -status-code -silent -o "${file%.txt}_http_status.txt"
           done
@@ -51,12 +52,19 @@ jobs:
         run: |
           TIMESTAMP=$(date +"%Y%m%d%H%M%S")
           FINAL_RESULTS="results/final_results_${TIMESTAMP}.txt"
-          touch "$FINAL_RESULTS"
+
+          # Write header to the final results file
+          echo "Scanning Results:" > "$FINAL_RESULTS"
+          echo "..." >> "$FINAL_RESULTS"
+          echo "..." >> "$FINAL_RESULTS"
 
           # Check if any *_http_status.txt files exist
-          if ls results/*_http_status.txt 1> /dev/null 2>&1; then
-            for file in results/*_http_status.txt; do
-              grep -E "(dev|stg|stag|staging)" "$file" | grep "\[200\]" >> "$FINAL_RESULTS"
+          shopt -s nullglob # Prevent globbing errors if no files match
+          FILES=(results/*_http_status.txt)
+
+          if [ ${#FILES[@]} -gt 0 ]; then
+            for file in "${FILES[@]}"; do
+              grep -E "(dev|stg|stag|staging)" "$file" | grep -q "\[200\]" && cat "$file" | grep -E "(dev|stg|stag|staging)" | grep "\[200\]" >> "$FINAL_RESULTS"
             done
           else
             echo "No *_http_status.txt files found. Skipping filtering step."
