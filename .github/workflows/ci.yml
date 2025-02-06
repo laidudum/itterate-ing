@@ -1,0 +1,78 @@
+name: Subdomain Scanner and HTTP Checker
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  scan-subdomains:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Checkout repository
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # Install dependencies
+      - name: Install Subfinder and HTTPX
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git curl
+          go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+          go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
+          echo "$HOME/go/bin" >> $GITHUB_PATH
+
+      # Read domains from domains.txt
+      - name: Load domains
+        id: load_domains
+        run: |
+          DOMAINS=$(cat domains.txt | tr '\n' ' ')
+          echo "DOMAINS=${DOMAINS}" >> $GITHUB_ENV
+
+      # Run subdomain scanning
+      - name: Scan subdomains
+        run: |
+          mkdir -p results
+          for domain in ${{ env.DOMAINS }}; do
+            subfinder -d "$domain" -o "results/${domain}_subdomains.txt"
+          done
+
+      # Check HTTP status for each subdomain
+      - name: Check HTTP status
+        run: |
+          for file in results/*_subdomains.txt; do
+            httpx -l "$file" -status-code -silent -o "${file%.txt}_http_status.txt"
+          done
+
+      # Filter results based on keywords and HTTP status 200
+      - name: Filter results
+        run: |
+          TIMESTAMP=$(date +"%Y%m%d%H%M%S")
+          FINAL_RESULTS="results/final_results_${TIMESTAMP}.txt"
+          touch "$FINAL_RESULTS"
+
+          # Check if any *_http_status.txt files exist
+          if ls results/*_http_status.txt 1> /dev/null 2>&1; then
+            for file in results/*_http_status.txt; do
+              grep -E "(dev|stg|stag|staging)" "$file" | grep "\[200\]" >> "$FINAL_RESULTS"
+            done
+          else
+            echo "No *_http_status.txt files found. Skipping filtering step."
+          fi
+
+      # Commit and push results back to the repository
+      - name: Commit results
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+
+          # Check if final results file exists and is not empty
+          if [ -s "$FINAL_RESULTS" ]; then
+            git add "$FINAL_RESULTS"
+            git commit -m "Update subdomain scan results with timestamp $(date +"%Y%m%d%H%M%S")"
+            git push
+          else
+            echo "Final results file is empty or does not exist. Skipping commit."
+          fi
